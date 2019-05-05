@@ -12,6 +12,6 @@ setup(
             'slackclient',
             'slackeventsapi',
             'python-redmine',
-            'pyandoc'
+            'html2text'
         ],
 )

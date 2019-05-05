@@ -1,92 +1,117 @@
+import os
+import slack
+import logging
+import html2text
+
 from flask import Flask
 from slackeventsapi import SlackEventAdapter
-from slackclient import SlackClient
 from urllib.parse import urlparse
 from redminelib import Redmine
-import pandoc
-import os
+from logging.config import dictConfig
+
+dictConfig({
+    'version': 1,
+    'formatters': {'default': {
+        'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
+    }},
+    'handlers': {'wsgi': {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'formatter': 'default',
+        'filename': 'logconfig.log',
+        'maxBytes': 1024
+    }},
+    'root': {
+        'level': 'INFO',
+        'handlers': ['wsgi']
+    }
+})
+
+redmine_key = os.environ["REDMINE_API_KEY"]
+redmine_url = os.environ["REDMINE_URL"]
+slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
+slack_bot_token = os.environ["SLACK_BOT_TOKEN"]
 
 application = app = Flask(__name__)
 
-slack_signing_secret=os.environ["SLACK_SIGNING_SECRET"]
+redmine = Redmine(redmine_url, key=redmine_key)
 slack_events_adapter = SlackEventAdapter(slack_signing_secret, "/slack/events", app)
-
-slack_bot_token=os.environ["SLACK_BOT_TOKEN"]
-slack_client = SlackClient(slack_bot_token)
-
-redmine_key=os.environ["REDMINE_API_KEY"]
-redmine = Redmine('http://redmine.trypotdev.com', key=redmine_key)
+slack_client = slack.WebClient(slack_bot_token)
 
 def contents_issue(url, paths):
     try:
         issue = redmine.issue.get(paths[2])
-    except:
+    except Exception as e:
         print("Issue not found : " + paths[2])
-        return { "title" : "TRYPOT Redmine", "text" : "존재하지 않는 이슈입니다" }
+        app.logger.debug("Issue not found : " + paths[2])
+        app.logger.debug(str(e))
+        return { "title" : "Omcode Redmine", "text" : "Задача не найдена." }
 
     user = redmine.user.get(issue.assigned_to.id)
     author = redmine.user.get(issue.author.id)
 
-    doc = pandoc.Document()
-    doc.html = issue.description.encode('utf-8')
+    h = html2text.HTML2Text()
+    h.ignore_links = True
+    description = h.handle(issue.description)
 
     if "created_on" in dir(issue):
-        create_date = " 이(가) " + issue.created_on.strftime("%Y/%m/%d") + "에 생성"
+        create_date = " " + issue.created_on.strftime("%Y/%m/%d") + " "
     else:
         create_date = ""
 
     if "due_date" in dir(issue):
         due_date = issue.due_date.strftime("%Y/%m/%d")
     else:
-        due_date = "없음"
+        due_date = "due"
 
     content = {
             "title" : issue.project.name + " #" + paths[2] + " " + issue.subject,
             "title_link" : url,
             "color" : "#7cd197",
-            "author_name" : issue.author.name + "(<@" + author.login + ">)" + create_date,
-            "fields" : [
-                { "title" : "담당자",   "value" : issue.assigned_to.name + " <@" + user.login + ">", "short" : False },
-                { "title" : "상태",     "value" : issue.status.name, "short" : True },
-                { "title" : "우선순위", "value" : issue.priority.name, "short" : True },
-                { "title" : "시작시간", "value" : issue.start_date.strftime("%Y/%m/%d"), "short" : True},
-                { "title" : "완료기한", "value" : due_date, "short" : True }
-            ],
-            "text" : str(doc.plain.decode('utf-8')),
-            "footer" : "TRYPOT Studios Inc."
+            #"author_name" : issue.author.name + "(<@" + author.login + ">)" + create_date,
+            #"fields" : [
+                #{ "title" : "Назначено на:", "value" : issue.assigned_to.name + " <@" + user.login + ">", "short" : False },
+                #{ "title" : "Статус:", "value" : issue.status.name, "short" : True },
+                #{ "title" : "Приоритет:", "value" : issue.priority.name, "short" : True },
+                #{ "title" : "С:", "value" : issue.start_date.strftime("%Y/%m/%d"), "short" : True},
+                #{ "title" : "До:", "value" : due_date, "short" : True }
+            #],
+            #"text" : description,
+            "footer" : "Omcode"
     }
     return content
 
 def contents_version(url, paths):
     try:
         version = redmine.version.get(paths[2])
-    except:
+    except Exception as e:
         print("Version not found : " + paths[2])
-        return { "title" : "TRYPOT Redmnine", "text" : "존재하지 않는 버젼입니다" }
+        app.logger.debug("Version not found : " + paths[2])
+        app.logger.debug(str(e))
+        return { "title" : "Omcode Redmine", "text" : "Версия не найдена." }
 
-    doc = pandoc.Document()
-    doc.html = version.description.encode('utf-8')
+    h = html2text.HTML2Text()
+    h.ignore_links = True
+    description = h.handle(version.description)
 
     content = {
             "title" : version.project.name + " @" + version.name,
             "title_link" : url,
             "color" : "#7c97d1",
-            "text" : str(doc.plain.decode('utf-8')),
+            "text" : description,
             "fields" : [
-                { "title" : "상태", "value" : version.status, "short" : True },
-                { "title" : "완료기한", "value" : version.due_date.strftime("%Y/%m/%d"), "short" : True }
+                { "title" : "test", "value" : version.status, "short" : True },
+                { "title" : "test", "value" : version.due_date.strftime("%Y/%m/%d"), "short" : True }
             ]
     }
 
     return content
-
 
 def parse_url(url):
     parsed = urlparse(url)
 
     paths = parsed.path.split('/')
 
-#    if parsed.netloc == "redmine.trypotdev.com" and paths[1] == "issues":
+#    if parsed.netloc == redmine_url and paths[1] == "issues":
     if paths[1] == "issues":
         return contents_issue(url, paths)
     elif paths[1] == "versions":
@@ -96,22 +121,34 @@ def parse_url(url):
 
 @slack_events_adapter.on("link_shared")
 def handle_unfurl(event_data):
+    app.logger.debug('Unfurl attempt.')
     message = event_data["event"]
     channel = message["channel"]
     message_ts = message["message_ts"]
 
     unfurls = {}
 
-    for link in message["links"]:
-        url = link["url"]
-        unfurls[url] = parse_url(url)
+    app.logger.debug("before unfurl")
 
-    result = slack_client.api_call("chat.unfurl", ts=message_ts, channel=channel, unfurls=unfurls)
+    try:
+        for link in message["links"]:
+            url = link["url"]
+            unfurls[url] = parse_url(url)
+
+        app.logger.debug("before send")
+        result = slack_client.api_call(api_method="chat.unfurl", json={'ts':message_ts, 'channel': channel, 'unfurls':unfurls})
+    except Exception as e:
+        app.logger.error(str(e))
+
+    app.logger.debug(str(result))
+    app.logger.debug("response sended")
     if result["ok"] != True:
         print(result["error"])
+        app.logger.error(result["error"])
 
 @slack_events_adapter.on("error")
 def error_handler(err):
+    app.logger.error("ERROR: " + str(err))
     print("ERROR: " + str(err))
 
 if __name__ == '__main__':
