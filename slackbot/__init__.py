@@ -99,7 +99,7 @@ def contents_version(url, paths):
             "color" : "#7c97d1",
             "text" : description,
             "fields" : [
-                { "title" : "test", "value" : version.status, "short" : True },
+                { "title" : "Статус", "value" : version.status, "short" : True },
                 { "title" : "Срок", "value" : version.due_date.strftime("%Y/%m/%d") if hasattr(version, "due_date") else "Не установлен", "short" : True }
             ]
     }
